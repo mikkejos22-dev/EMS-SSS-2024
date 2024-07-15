@@ -1,0 +1,239 @@
+from __future__ import print_function
+import tensorflow as tf
+from keras.callbacks import ReduceLROnPlateau, ModelCheckpoint
+from keras.optimizers import SGD, RMSprop
+from keras.src.layers import AveragePooling2D
+from tensorflow.keras.datasets import cifar100
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, Activation, Flatten, BatchNormalization
+from tensorflow.keras.layers import Conv2D, MaxPooling2D
+from tensorflow.keras.callbacks import EarlyStopping
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
+main_directory = '30by30 images'  # Add personal directory here
+transfer_directory = 'Transfer Dataset'  # Add personal directory here
+
+component_train = tf.keras.preprocessing.image_dataset_from_directory(
+    main_directory,
+    validation_split=0.2,
+    subset='training',
+    seed=123,
+    batch_size=16,
+    color_mode='grayscale',
+    image_size=(30, 30)
+)
+
+component_test = tf.keras.preprocessing.image_dataset_from_directory(
+    main_directory,
+    validation_split=0.3,
+    subset='validation',
+    seed=123,
+    batch_size=16,
+    color_mode='grayscale',
+    image_size=(30, 30)
+)
+
+# Data Augmentation setup
+datagen = ImageDataGenerator(
+    rotation_range=25,
+    width_shift_range=0.3,
+    height_shift_range=0.3,
+    shear_range=0.3,
+    zoom_range=0.3,
+    horizontal_flip=True,
+    fill_mode='nearest',
+    validation_split=0.3  # Reserve 30% of data for validation
+)
+
+# Modify dataset loading to include data augmentation
+component_train_augmented = datagen.flow_from_directory(
+    main_directory,
+    target_size=(30, 30),
+    color_mode='grayscale',
+    batch_size=16,
+    class_mode='sparse',
+    subset='training',
+    seed=123
+)
+
+component_test_augmented = datagen.flow_from_directory(
+    main_directory,
+    target_size=(30, 30),
+    color_mode='grayscale',
+    batch_size=16,
+    class_mode='sparse',
+    subset='validation',
+    seed=123
+)
+
+transfer_train_augmented = datagen.flow_from_directory(
+    transfer_directory,
+    target_size=(30, 30),
+    color_mode='grayscale',
+    batch_size=16,
+    class_mode='sparse',
+    subset='training',
+    seed=123
+)
+
+transfer_test_augmented = datagen.flow_from_directory(
+    transfer_directory,
+    target_size=(30, 30),
+    color_mode='grayscale',
+    batch_size=16,
+    class_mode='sparse',
+    subset='validation',
+    seed=123
+)
+
+# Early stopping callback
+early_stopping = EarlyStopping(
+    monitor='val_loss',
+    patience=4,  # Number of epochs with no improvement after which training will be stopped
+    restore_best_weights=True  # Restore model weights from the epoch with the best value of the monitored quantity
+)
+
+model_checkpoint = ModelCheckpoint(
+    'best_model.keras',
+    monitor='val_loss',
+    save_best_only=True
+)
+
+# Cache and prefetch setup
+AUTOTUNE = tf.data.AUTOTUNE
+component_train_augmented = component_train.cache().prefetch(buffer_size=AUTOTUNE)
+component_test_augmented = component_test.cache().prefetch(buffer_size=AUTOTUNE)
+transfer_train_augmented = component_train.cache().prefetch(buffer_size=AUTOTUNE)
+transfer_test_augmented = component_test.cache().prefetch(buffer_size=AUTOTUNE)
+
+# Reduce learning rate on plateau: helps with overfitting
+reduce_lr = ReduceLROnPlateau(
+    monitor='val_loss',
+    factor=0.1,  # Factor by which the learning rate will be reduced
+    patience=2,  # Number of epochs with no improvement after which learning rate will be reduced
+    min_lr=0.00001  # Lower bound on the learning rate
+)
+
+num_classes = 3
+
+# Model 1
+feature_layers_1 = [
+    Conv2D(32, (3, 3), activation='silu', input_shape=(30, 30, 1)),
+    AveragePooling2D(pool_size=(2, 2)),
+    Conv2D(32, (3, 3), activation='silu'),
+    AveragePooling2D(pool_size=(2, 2)),
+    Conv2D(32, (3, 3), activation='silu'),
+    AveragePooling2D(pool_size=(2, 2)),
+    Flatten()
+]
+
+classification_layers_1 = [
+    Dense(128),
+    Activation('silu'),
+    Dropout(0.26),
+    Dense(num_classes),
+    Activation('softmax')
+]
+
+model_1 = Sequential(feature_layers_1 + classification_layers_1)
+
+model_1.summary()
+
+# First compile with RMSprop optimizer
+model_1.compile(
+    optimizer=RMSprop(learning_rate=0.001),
+    loss='sparse_categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+model_1.fit(
+    component_train_augmented,
+    validation_data=component_test_augmented,
+    epochs=50,
+    callbacks=[early_stopping, reduce_lr, model_checkpoint]
+)
+
+for layer in feature_layers_1:
+    layer.trainable = False
+
+model_1 = Sequential(feature_layers_1 + classification_layers_1)
+
+model_1.summary()
+
+# Second compile with Adam optimizer (unchanged)
+model_1.compile(
+    optimizer=RMSprop(learning_rate=0.001),
+    loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+    metrics=['accuracy']
+)
+
+model_1.fit(
+    transfer_train_augmented,
+    validation_data=transfer_test_augmented,
+    epochs=10,
+    callbacks=[early_stopping, reduce_lr, model_checkpoint]
+)
+fig, ax = plt.subplots(figsize=(10, 8))
+
+# Input Layer
+ax.add_patch(patches.Rectangle((0, 8), 1, 1, edgecolor='black', facecolor='lightblue'))
+ax.text(0.5, 8.5, 'Input\n30x30x1', ha='center', va='center')
+
+# Conv2D Layer 1
+ax.add_patch(patches.Rectangle((1, 8), 1, 1, edgecolor='black', facecolor='lightgreen'))
+ax.text(1.5, 8.5, 'Conv2D\n32 3x3', ha='center', va='center')
+
+# AveragePooling2D Layer 1
+ax.add_patch(patches.Rectangle((2, 8), 1, 1, edgecolor='black', facecolor='lightyellow'))
+ax.text(2.5, 8.5, 'AvgPool\n2x2', ha='center', va='center')
+
+# Conv2D Layer 2
+ax.add_patch(patches.Rectangle((3, 8), 1, 1, edgecolor='black', facecolor='lightgreen'))
+ax.text(3.5, 8.5, 'Conv2D\n32 3x3', ha='center', va='center')
+
+# AveragePooling2D Layer 2
+ax.add_patch(patches.Rectangle((4, 8), 1, 1, edgecolor='black', facecolor='lightyellow'))
+ax.text(4.5, 8.5, 'AvgPool\n2x2', ha='center', va='center')
+
+# Conv2D Layer 3
+ax.add_patch(patches.Rectangle((5, 8), 1, 1, edgecolor='black', facecolor='lightgreen'))
+ax.text(5.5, 8.5, 'Conv2D\n32 3x3', ha='center', va='center')
+
+# AveragePooling2D Layer 3
+ax.add_patch(patches.Rectangle((6, 8), 1, 1, edgecolor='black', facecolor='lightyellow'))
+ax.text(6.5, 8.5, 'AvgPool\n2x2', ha='center', va='center')
+
+# Flatten Layer
+ax.add_patch(patches.Rectangle((7, 8), 1, 1, edgecolor='black', facecolor='lightcoral'))
+ax.text(7.5, 8.5, 'Flatten', ha='center', va='center')
+
+# Dense Layer 1
+ax.add_patch(patches.Rectangle((8, 8), 1, 1, edgecolor='black', facecolor='lightpink'))
+ax.text(8.5, 8.5, 'Dense\n128', ha='center', va='center')
+
+# Activation (SiLU) Layer
+ax.add_patch(patches.Rectangle((9, 8), 1, 1, edgecolor='black', facecolor='lightgrey'))
+ax.text(9.5, 8.5, 'Activation\nSiLU', ha='center', va='center')
+
+# Dropout Layer
+ax.add_patch(patches.Rectangle((10, 8), 1, 1, edgecolor='black', facecolor='lightsalmon'))
+ax.text(10.5, 8.5, 'Dropout\n0.26', ha='center', va='center')
+
+# Dense Layer 2
+ax.add_patch(patches.Rectangle((11, 8), 1, 1, edgecolor='black', facecolor='lightpink'))
+ax.text(11.5, 8.5, 'Dense\n3', ha='center', va='center')
+
+# Activation (Softmax) Layer
+ax.add_patch(patches.Rectangle((12, 8), 1, 1, edgecolor='black', facecolor='lightgrey'))
+ax.text(12.5, 8.5, 'Activation\nSoftmax', ha='center', va='center')
+
+# Connections
+for i in range(12):
+    ax.plot([i + 0.5, i + 1.5], [8.5, 8.5], 'k-')
+
+ax.set_xlim(0, 14)
+ax.set_ylim(7, 10)
+ax.axis('off')
+plt.show()
