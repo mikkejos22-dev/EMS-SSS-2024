@@ -1,0 +1,25 @@
+#GETTING STARTED:
+
+    #DARKNET: Navigate to the Darknet submodule inside this folder and install or clone the respository to your device.
+
+    #YOLOV3: Navigate to this YOLO website (https://pjreddie.com/darknet/yolo/) and find a yolo weight file you want to use (e.g. yolo3.weights).
+        This website will be specifically for the Yolov3 weights, this can be changed once you configure the darkent neural network and get it running.
+
+    #CMAKE: Navigate to the Cmake website and download cmake by clicking "download" in the top right corner and clicking the setup file for your OS version.
+        CMake Download Page URL: https://cmake.org/download/
+
+    #VISUAL STUDIO COMMUNITY EDITION: You will need visual studio for this project as well to build the neural network executable.
+        VS installer URL: https://visualstudio.microsoft.com/vs/community/
+
+    #You should now have everything downloaded that you will need to run the program. If you want to download OpenCV there it takes a bit more debugging which to run
+    which I did not do. The benefit of OpenCV is that when you run the network it will pop up the image that was produced for you instead of going into the darkent
+    file and opening it yourself
+
+#SETUP (Cmake and VS)
+    Since by this point you will have everything installed follow this (https://www.youtube.com/watch?v=saDipJR14Lc&t=1066s&ab_channel=TheAIGuy) tutorial 
+    and start at the time "7:24:00". This will pickup after all of the installation stages showing where the yolov3 weight file is located and where it will go. 
+    You will need to disable ENABLE CUDA and ENABLE OPENCV in Cmake after you run configuration following the video.
+
+#USING DeepPCB DATA
+    When following the tutorial above it will have you run data from the darknet practice data folder. We now need to take data from DeepPCB and use that.
+    Begin by going to the DeepPCB_Dataset file under the Collin folder in this repository. (To be continued)
