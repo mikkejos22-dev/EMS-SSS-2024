@@ -1,0 +1,3 @@
+[submodule "Collin/darknet"]
+	path = Collin/darknet
+	url = https://github.com/Cbergmann00/darknet.git
