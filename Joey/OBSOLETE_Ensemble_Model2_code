@@ -1,0 +1,253 @@
+from __future__ import print_function
+import tensorflow as tf
+import numpy as np
+from sklearn.metrics import accuracy_score
+from keras.callbacks import ReduceLROnPlateau, ModelCheckpoint
+from keras.optimizers import RMSprop
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, Activation, Flatten, BatchNormalization, Input
+from tensorflow.keras.layers import Conv2D, MaxPooling2D
+from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.regularizers import l2
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
+main_directory = '30by30 images'  # Add personal directory here
+transfer_directory = 'Transfer Dataset'  # Add personal directory here
+
+component_train = tf.keras.preprocessing.image_dataset_from_directory(
+    main_directory,
+    validation_split=0.2,
+    subset='training',
+    seed=123,
+    batch_size=16,
+    color_mode='grayscale',
+    image_size=(30, 30)
+)
+
+component_test = tf.keras.preprocessing.image_dataset_from_directory(
+    main_directory,
+    validation_split=0.2,
+    subset='validation',
+    seed=123,
+    batch_size=16,
+    color_mode='grayscale',
+    image_size=(30, 30)
+)
+
+transfer_train = tf.keras.preprocessing.image_dataset_from_directory(
+    transfer_directory,
+    validation_split=0.2,
+    subset='training',
+    seed=123,
+    batch_size=16,
+    color_mode='grayscale',
+    image_size=(30, 30)
+)
+
+transfer_test = tf.keras.preprocessing.image_dataset_from_directory(
+    transfer_directory,
+    validation_split=0.2,
+    subset='validation',
+    seed=123,
+    batch_size=16,
+    color_mode='grayscale',
+    image_size=(30, 30)
+)
+
+datagen = ImageDataGenerator(
+    rotation_range=35,
+    width_shift_range=0.3,
+    height_shift_range=0.3,
+    shear_range=0.3,
+    zoom_range=0.3,
+    horizontal_flip=True,
+    fill_mode='nearest'
+)
+
+early_stopping = EarlyStopping(
+    monitor='val_loss',
+    patience=4,  # Number of epochs with no improvement after which training will be stopped
+    restore_best_weights=True  # Restore model weights from the epoch with the best value of the monitored quantity
+)
+
+model_checkpoint = ModelCheckpoint(
+    'best_model.keras',
+    monitor='val_loss',
+    save_best_only=True
+)
+
+# Cache and prefetch setup
+AUTOTUNE = tf.data.AUTOTUNE
+component_train = component_train.cache().prefetch(buffer_size=AUTOTUNE)
+component_test = component_test.cache().prefetch(buffer_size=AUTOTUNE)
+transfer_train = transfer_train.cache().prefetch(buffer_size=AUTOTUNE)
+transfer_test = transfer_test.cache().prefetch(buffer_size=AUTOTUNE)
+
+# Pretraining: Self-Supervised Rotation Prediction
+def create_rotated_dataset(dataset):
+    rotated_images = []
+    rotated_labels = []
+    rotations = [0, 90, 180, 270]
+    for images, labels in dataset:
+        for image in images:
+            for i, angle in enumerate(rotations):
+                rotated_images.append(tf.image.rot90(image, k=i))
+                rotated_labels.append(i)
+    return tf.data.Dataset.from_tensor_slices((rotated_images, rotated_labels))
+
+rotated_train = create_rotated_dataset(transfer_train)
+rotated_test = create_rotated_dataset(transfer_test)
+
+#rotation model 
+rotation_model = Sequential([
+    Conv2D(32, 3, activation='silu', input_shape=(30, 30, 1), kernel_regularizer=l2(0.001)),
+    Conv2D(32, 3, activation='silu', kernel_regularizer=l2(0.001)),
+    MaxPooling2D(),
+    Conv2D(32, 3, activation='silu', kernel_regularizer=l2(0.001)),
+    Conv2D(32, 3, activation='silu', kernel_regularizer=l2(0.001)),
+    MaxPooling2D(),
+    Flatten(),
+    Dense(256, activation='silu', kernel_regularizer=l2(0.001)),
+    Dropout(0.33),
+    Dense(4, activation='softmax')
+])
+
+rotation_model.compile(
+    optimizer=RMSprop(learning_rate=0.0015),
+    loss='sparse_categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+rotation_model.fit(
+    rotated_train.batch(32),
+    validation_data=rotated_test.batch(32),
+    epochs=50,
+    callbacks=[early_stopping, ReduceLROnPlateau(monitor='val_loss', factor=0.15, patience=3, min_lr=0.000001), model_checkpoint]
+)
+
+rotation_model.summary()
+
+# Fine-tuning: PCB Component Identification
+num_classes = 3
+n_models = 5
+models = []
+models_transfer = []
+
+for i in range(n_models):
+    # Create feature layers
+    feature_layers_2 = [
+        Conv2D(32, 3, activation='silu', input_shape=(30, 30, 1), kernel_regularizer=l2(0.001)),
+        Conv2D(32, 3, activation='silu', kernel_regularizer=l2(0.001)),
+        MaxPooling2D(),
+        Conv2D(32, 3, activation='silu', kernel_regularizer=l2(0.001)),
+        Conv2D(32, 3, activation='silu', kernel_regularizer=l2(0.001)),
+        MaxPooling2D(),
+        Flatten(),
+    ]
+
+    classification_layers_2 = [
+        Dense(256, activation='silu', kernel_regularizer=l2(0.001)),
+        Dense(256, activation='sigmoid', kernel_regularizer=l2(0.001)),
+        Dropout(0.40),
+        Dense(num_classes),
+        Activation('softmax')
+    ]
+
+    # main model start
+    main_model = Sequential(feature_layers_2 + classification_layers_2)
+
+    for j, layer in enumerate(main_model.layers[:7]):  # Only transfer feature layers
+        layer.set_weights(rotation_model.layers[j].get_weights())
+
+    main_model.compile(
+        optimizer=RMSprop(learning_rate=0.001),
+        loss='sparse_categorical_crossentropy',
+        metrics=['accuracy']
+    )
+
+    main_model.fit(
+        component_train,
+        validation_data=component_test,
+        epochs=50,
+        callbacks=[early_stopping, ReduceLROnPlateau(monitor='val_loss', factor=0.15, patience=3, min_lr=0.000001), model_checkpoint]
+    )
+    main_model.summary()
+    models.append(main_model)
+
+for i in range(n_models):
+    feature_layers_2 = [
+        Conv2D(32, 3, activation='silu', input_shape=(30, 30, 1), kernel_regularizer=l2(0.001)),
+        Conv2D(32, 3, activation='silu', kernel_regularizer=l2(0.001)),
+        MaxPooling2D(),
+        Conv2D(32, 3, activation='silu', kernel_regularizer=l2(0.001)),
+        Conv2D(32, 3, activation='silu', kernel_regularizer=l2(0.001)),
+        MaxPooling2D(),
+        Flatten(),
+    ]
+
+    classification_layers_2 = [
+        Dense(256, activation='silu', kernel_regularizer=l2(0.001)),
+        Dense(256, activation='sigmoid', kernel_regularizer=l2(0.001)),
+        Dropout(0.40),
+        Dense(num_classes),
+        Activation('softmax')
+    ]
+
+    #pretrained model 
+    transfer_model = Sequential(feature_layers_2 + classification_layers_2)
+
+    for j, layer in enumerate(transfer_model.layers[:7]): ]
+        layer.set_weights(rotation_model.layers[j].get_weights())
+
+    for layer in transfer_model.layers[:7]:
+        layer.trainable = False
+
+    transfer_model.compile(
+        optimizer=RMSprop(learning_rate=0.001),
+        loss='sparse_categorical_crossentropy',
+        metrics=['accuracy']
+    )
+
+    transfer_model.fit(
+        transfer_train,
+        validation_data=transfer_test,
+        epochs=50,
+        callbacks=[early_stopping, ReduceLROnPlateau(monitor='val_loss', factor=0.15, patience=3, min_lr=0.000001), model_checkpoint]
+    )
+    transfer_model.summary()
+    models_transfer.append(transfer_model)
+
+def ensemble_predict(models, dataset):
+    predictions = []
+    labels = []
+    for images, lbls in dataset:
+        batch_predictions = np.zeros((images.shape[0], len(models), num_classes))
+        for i, model in enumerate(models):
+            batch_predictions[:, i, :] = model.predict(images)
+        averaged_predictions = np.mean(batch_predictions, axis=1)
+        # probabilties converted to labels
+        predictions.extend(np.argmax(averaged_predictions, axis=1))
+        labels.extend(lbls.numpy())
+    return np.array(predictions), np.array(labels)
+
+def transfer_ensemble_predict(models_transfer, dataset):
+    predictions = []
+    labels = []
+    for images, lbls in dataset:
+        batch_predictions = np.zeros((images.shape[0], len(models_transfer), num_classes))
+        for i, model in enumerate(models_transfer):
+            batch_predictions[:, i, :] = model.predict(images)
+        averaged_predictions = np.mean(batch_predictions, axis=1)
+        # probbilites converted to labels
+        predictions.extend(np.argmax(averaged_predictions, axis=1))
+        labels.extend(lbls.numpy())
+    return np.array(predictions), np.array(labels)
+
+# predictions
+component_predictions, component_labels = ensemble_predict(models, component_test)
+transfer_predictions, transfer_labels = transfer_ensemble_predict(models_transfer, transfer_test)
+
+print("Component Test Accuracy:", accuracy_score(component_labels, component_predictions))
+print("Transfer Test Accuracy:", accuracy_score(transfer_labels, transfer_predictions))
