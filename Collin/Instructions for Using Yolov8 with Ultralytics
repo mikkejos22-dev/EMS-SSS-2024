@@ -68,5 +68,10 @@ After training steps
     - Results.csv shows preformance metrics
     - Results.png shows all the performance metrics in graphs
 
+Step 4: Testing the network
+    - Take an image and put it in the root folder "yolov8_custom", just one photo
+    - To make it simple you can change the images name to a single digit or letter
+    - Run the command, "yolo task=detect mode=predict model=yolov8_custom.pt show=True conf=0.5 source=<image name.jpeg>"
+    - Test outputs are in the runs/detect/predict folder.
 
 
