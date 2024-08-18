@@ -1,25 +1,72 @@
-#GETTING STARTED:
+YOLOV8 Custom Dataset (Ultralytics)
 
-    #DARKNET: Navigate to the Darknet submodule inside this folder and install or clone the respository to your device.
+Begin by creating a new folder/directory on your desktop
 
-    #YOLOV3: Navigate to this YOLO website (https://pjreddie.com/darknet/yolo/) and find a yolo weight file you want to use (e.g. yolo3.weights).
-        This website will be specifically for the Yolov3 weights, this can be changed once you configure the darkent neural network and get it running.
+Required Configuration:
+    - Create an environment in command prompt or anaconda prompt name it (yolov8_custom).
+    - Navigate into the environment, if youre using anaconda prompt the command is, "conda activate yolov8_custom".
+    - Inside the new directory create folder images and put all unlabeled images in this folder
+    - In command navigate the yolov8 environment and use the following command, "pip install labelImg"
+    - Run the labeling tool with the command, "labelImg" then hit enter.
 
-    #CMAKE: Navigate to the Cmake website and download cmake by clicking "download" in the top right corner and clicking the setup file for your OS version.
-        CMake Download Page URL: https://cmake.org/download/
+Step 1: Labeling the dataset
+    - Run command labelImg in yolov8 environment on anaconda prompt
+    - Open file (top left), go to open directory, this will point towards the folder with all of your images
+    - Open file (top left), go to change save dir, this will need to point towards where labeled images save.
+        - This directory will be the folder "labels" which needs to be created in your desktop folder "yolov8_custom".
+    - Above the left panel option "create rect box" but below the option save, there is the network type. This needs to be set to Yolo.
+    - Click on "create rect box" and draw a box over an object or part of the image you want to identify.
+        - Give it a name and click okay.
+        - Continue doing this for all parts of the image you want labelled.
+    - Once you have named all objects in the image, click next image option from the left panel.
+    - Continue the above labeling steps for each image.
+    - To verify all images were labeled you can check the 'labels' folder and look for a text file corresponding to each labeled image.
+    - NOTE: If you have a lot of images and feel what you have labeled is enough you can stop at anytime and delete extra images that do not have a corresponding .txt file in the labels folder.
 
-    #VISUAL STUDIO COMMUNITY EDITION: You will need visual studio for this project as well to build the neural network executable.
-        VS installer URL: https://visualstudio.microsoft.com/vs/community/
+Step 2: Setting up for training and testing
+    - In the yolov8_customs folder on your desktop create two need directories
+        - "train" and "val"
+    - Inside the "val" folder create two new folders, "images" and "labels"
+    - Move a few photos from the original images folder (6-10 images will work) and move them to the images folder in the "val" folder.
+    - Move the corresponding .txt label files from the original labels folder to the labels folder in the "val" directory that matches the images.
+    - Inside the yolov8_custom/labels folder, move the classes.txt file to the root folder, yolov8_custom
+    - Move the images and labels folders from the yolov8_custom folder, into the "train" folder.
 
-    #You should now have everything downloaded that you will need to run the program. If you want to download OpenCV there it takes a bit more debugging which to run
-    which I did not do. The benefit of OpenCV is that when you run the network it will pop up the image that was produced for you instead of going into the darkent
-    file and opening it yourself
+Step 3: Training on the custom dataset
+    - Create a file in the yolov8_custom folder named, data_custom.yaml. This will be your configuration file.
+    - NOTE: at this moment you should have these 4 things in your yolov8_custom folder.
+        - train folder, val folder, classes.txt, and data_custom.yaml
+    - Right-click "data_custom.yaml" and edit with a text editor such as notepad or notepad++
+    - This file should be written as so, line 1 "train: ./train", lines 2 "val: ./val", line 3 skip, line 4 "nc : <# of classes or labels you used> this is equalivant to the amount of items in your classes.txt file, Line 5 skip, line 6: "names:["",""] --> list of all items in your classes.txt file in qoutes.
+        - Example, if my classes.txt file says head on line 1 and shirt on line 2, the names variable would look like this --> names: ["head","shirt"]
+    - Save the data_custom.yaml file.
 
-#SETUP (Cmake and VS)
-    Since by this point you will have everything installed follow this (https://www.youtube.com/watch?v=saDipJR14Lc&t=1066s&ab_channel=TheAIGuy) tutorial 
-    and start at the time "7:24:00". This will pickup after all of the installation stages showing where the yolov3 weight file is located and where it will go. 
-    You will need to disable ENABLE CUDA and ENABLE OPENCV in Cmake after you run configuration following the video.
+Setting up for Training
+    - Open anaconda prompt and navigate to your yolov8_custom directory, should look something like, "(yolov8_custom) D:\user\name\desktop\yolov8_custom>"
+        - The (yolov8_custom) is the environment you created you should be using, if it is not there run the command "conda activate yolov8_custom"
+    - Now install "Ultralytics", usings command, "pip install Ultralytics" press <enter>
+    - To verify that it installed the cpu version run command "python" <enter> "import torch" <enter> "torch.__version__" <enter>.
+        - This should display something like "x.xx.x+cpu" as the version
 
-#USING DeepPCB DATA
-    When following the tutorial above it will have you run data from the darknet practice data folder. We now need to take data from DeepPCB and use that.
-    Begin by going to the DeepPCB_Dataset file under the Collin folder in this repository. (To be continued)
+Installing Pytorch GPU version (Skip if you want to use CPU <slower> and dont have a GPU)
+    - go to pytorch.org, select the same pytorch build version as the one that posted above
+    - select your operating system version, select package "pip", findout what you CUDA version is and select this for compute platform
+    - Copy command at the bottom and run it in your anacoda prompt, but add the flag --upgrade in betwee install and torch "install --upgrade torch..."
+    - Now run "python" <enter>, "import torch" <enter>, "torch.__version__" <enter>, this time it should appear that it is using CUDA (GPU)
+        - Example: "x.xx.x+cu117"
+    - To see if CUDA is running you can also at this point run the command, "torch.cuda.is.available()"
+
+Training with Custom Dataset
+    - Navgiate to the Ultralytics github repositroy, "github.com/Ultralytics/Ultralytics"
+    - Navigate to the models section on this github page and select a v8 model to run (recommended: yolov8m) follow next step to get this package
+    - Go to anacoda prompt and enter the command, "yolo task=detect mode=train epochs=100 data=data_custom.yaml model=yolov8m.pt imgz=640" <-- the model is determined by what you chose above, followed by .pt. This will download and pull that model from the github when you hit enter.
+    - If you run into an error here pertaining to missing file paths, you will need to update the data_custom.yaml file to contain the full file paths for train: and val: variables (example: D:\user\name\desktop\yolov8_custom\train)
+    - Try running the command again.
+
+After training steps
+    - Command line should tell you where the results were saved runs\detect\train
+    - Results.csv shows preformance metrics
+    - Results.png shows all the performance metrics in graphs
+
+
+
