@@ -1,0 +1,327 @@
+from __future__ import print_function
+import tensorflow as tf
+import os
+from keras.src.saving.saving_api import save_model
+from keras.callbacks import ReduceLROnPlateau, ModelCheckpoint
+from keras.optimizers import RMSprop
+from keras.src.layers import AveragePooling2D
+from tensorflow.keras.preprocessing import image
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.models import Sequential, Model, load_model
+from tensorflow.keras.layers import Dense, Dropout, Activation, Flatten, BatchNormalization, Input, Conv2D, MaxPooling2D
+from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.regularizers import l2
+import time
+import numpy as np
+from PIL import Image, ImageOps
+import matplotlib.pyplot as plt
+
+main_directory = '30by30-images'  # Add personal directory here
+transfer_directory = 'Transfer-Dataset'  # Add personal directory here
+
+# Load data
+component_train = tf.keras.preprocessing.image_dataset_from_directory(
+    main_directory,
+    validation_split=0.2,
+    subset='training',
+    seed=123,
+    batch_size=16,
+    color_mode='grayscale',
+    image_size=(30, 30)
+)
+
+component_test = tf.keras.preprocessing.image_dataset_from_directory(
+    main_directory,
+    validation_split=0.3,
+    subset='validation',
+    seed=123,
+    batch_size=16,
+    color_mode='grayscale',
+    image_size=(30, 30)
+)
+transfer_train = tf.keras.preprocessing.image_dataset_from_directory(transfer_directory,
+                                                                      validation_split = 0.2,
+                                                                      subset = 'training',
+                                                                      seed = 123,
+                                                                      batch_size = 16,
+                                                                      color_mode = 'grayscale',
+                                                                      image_size = (30,30)
+                                                                     )
+transfer_test = tf.keras.preprocessing.image_dataset_from_directory(transfer_directory,
+                                                                      validation_split = 0.2,
+                                                                      subset = 'validation',
+                                                                      seed = 123,
+                                                                      batch_size = 16,
+                                                                      color_mode = 'grayscale',
+                                                                      image_size = (30,30)
+                                                                     )
+
+# Data Augmentation setup
+datagen = ImageDataGenerator(
+    rotation_range=35,
+    width_shift_range=0.3,
+    height_shift_range=0.3,
+    shear_range=0.3,
+    zoom_range=0.3,
+    horizontal_flip=True,
+    fill_mode='nearest',
+    validation_split=0.3
+)
+
+# Modify dataset loading to include data augmentation
+component_train_augmented = datagen.flow_from_directory(
+    main_directory,
+    target_size=(30, 30),
+    color_mode='grayscale',
+    batch_size=16,
+    class_mode='sparse',
+    subset='training',
+    seed=123
+)
+
+component_test_augmented = datagen.flow_from_directory(
+    main_directory,
+    target_size=(30, 30),
+    color_mode='grayscale',
+    batch_size=16,
+    class_mode='sparse',
+    subset='validation',
+    seed=123
+)
+
+transfer_train_augmented = datagen.flow_from_directory(
+    transfer_directory,
+    target_size=(30, 30),
+    color_mode='grayscale',
+    batch_size=16,
+    class_mode='sparse',
+    subset='training',
+    seed=123
+)
+
+transfer_test_augmented = datagen.flow_from_directory(
+    transfer_directory,
+    target_size=(30, 30),
+    color_mode='grayscale',
+    batch_size=16,
+    class_mode='sparse',
+    subset='validation',
+    seed=123
+)
+
+# Early stopping callback
+early_stopping = EarlyStopping(
+    monitor='val_loss',
+    patience=4,  # Number of epochs with no improvement after which training will be stopped
+    restore_best_weights=True  # Restore model weights from the epoch with the best value of the monitored quantity
+)
+
+model_checkpoint = ModelCheckpoint(
+    'best_model.keras',
+    monitor='val_loss',
+    save_best_only=True
+)
+
+# Cache and prefetch setup
+AUTOTUNE = tf.data.AUTOTUNE
+component_train_augmented = component_train.cache().prefetch(buffer_size=AUTOTUNE)
+component_test_augmented = component_test.cache().prefetch(buffer_size=AUTOTUNE)
+transfer_train_augmented = component_train.cache().prefetch(buffer_size=AUTOTUNE)
+transfer_test_augmented = component_test.cache().prefetch(buffer_size=AUTOTUNE)
+
+# Reduce learning rate on plateau: helps with overfitting
+reduce_lr = ReduceLROnPlateau(
+    monitor='val_loss',
+    factor=0.15,  # Factor by which the learning rate will be reduced
+    patience=2,  # Number of epochs with no improvement after which learning rate will be reduced
+    min_lr=0.000001  # Lower bound on the learning rate
+)
+
+l2_regularizer = l2(0.001)  # You can adjust the regularization factor
+
+num_classes = 3
+# Pretraining: Self-Supervised Rotation Prediction
+def create_rotated_dataset(dataset):
+    rotated_images = []
+    rotated_labels = []
+    rotations = [0, 90, 180, 270]
+    for images, labels in dataset:
+        for image in images:
+            for i, angle in enumerate(rotations):
+                rotated_images.append(tf.image.rot90(image, k=i))
+                rotated_labels.append(i)
+    return tf.data.Dataset.from_tensor_slices((rotated_images, rotated_labels))
+
+rotated_train = create_rotated_dataset(transfer_train)
+rotated_test = create_rotated_dataset(transfer_test)
+
+    # Define rotation prediction model
+rotation_model = Sequential([
+    Conv2D(32, 3, activation='silu', input_shape=(30, 30, 1), kernel_regularizer=l2_regularizer),
+    Conv2D(32, 3, activation='silu', kernel_regularizer=l2_regularizer),
+    BatchNormalization(),
+    MaxPooling2D(),
+    Dropout(0.33),
+    Conv2D(32, 3, activation='silu', kernel_regularizer=l2_regularizer),
+    Conv2D(32, 3, activation='silu', kernel_regularizer=l2_regularizer),
+    BatchNormalization(),
+    MaxPooling2D(),
+    Dropout(0.33),
+    Conv2D(32, 3, activation='silu', kernel_regularizer=l2_regularizer),
+    BatchNormalization(),
+    AveragePooling2D(pool_size=(2, 2)),
+    Flatten(),
+    Dense(512, activation='silu', kernel_regularizer=l2_regularizer),
+    Dense(256, activation='sigmoid', kernel_regularizer= l2_regularizer),
+    Dropout(0.45),
+    Dense(4, activation='softmax')
+])
+
+rotation_model.compile(
+    optimizer=RMSprop(learning_rate=0.0020),
+    loss='sparse_categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+rotation_model.fit(
+    rotated_train.batch(32),
+    validation_data=rotated_test.batch(32),
+    epochs=50,
+    callbacks=[early_stopping, reduce_lr]
+)
+rotation_model.summary()
+    # Fine-tuning: PCB Component Identification
+feature_layers_2 = [
+        Conv2D(32, 3, activation='silu', input_shape=(30, 30, 1), kernel_regularizer= l2_regularizer),
+        Conv2D(32, 3, activation='silu', kernel_regularizer = l2_regularizer),
+        BatchNormalization(),
+        MaxPooling2D(),
+        Dropout(0.33),
+        Conv2D(32, 3, activation='silu', kernel_regularizer = l2_regularizer),
+        Conv2D(32, 3, activation='silu', kernel_regularizer = l2_regularizer),
+        BatchNormalization(),
+        MaxPooling2D(),
+        Dropout(0.33),
+        Conv2D(32 ,3, activation='silu', kernel_regularizer= l2_regularizer),
+        BatchNormalization(),
+        AveragePooling2D(pool_size=(2, 2)),
+        Flatten(),
+    ]
+
+classification_layers_2 = [
+        Dense(512, activation='silu', kernel_regularizer= l2_regularizer),
+        Dense(256, activation='sigmoid', kernel_regularizer= l2_regularizer),
+        Dropout(0.45),
+        Dense(num_classes),
+        Activation('softmax')
+    ]
+
+# Initialize main model with pretrained weights
+main_model = Sequential(feature_layers_2 + classification_layers_2)
+
+# Transfer weights from the rotation prediction model
+for i, layer in enumerate(main_model.layers[:8]):  # Only transfer feature layers
+    layer.set_weights(rotation_model.layers[i].get_weights())
+
+main_model.compile(
+    optimizer=RMSprop(learning_rate=0.001),
+    loss='sparse_categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+main_model.fit(
+        component_train_augmented,
+        validation_data=component_test_augmented,
+        epochs=18,
+        callbacks=[reduce_lr]
+)
+main_model.summary()
+# Fine-tune on transfer dataset
+for layer in feature_layers_2:
+    layer.trainable = False
+
+transfer_model = Sequential(feature_layers_2 + classification_layers_2)
+
+transfer_model.compile(
+    optimizer=RMSprop(learning_rate=0.001),
+    loss='sparse_categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+transfer_model.fit(
+    transfer_train_augmented,
+    validation_data= transfer_test_augmented,
+    epochs=4,
+    callbacks=[reduce_lr, model_checkpoint]
+    )
+
+transfer_model.summary()
+
+save_model(transfer_model, 'Model-Files/transferModel.h5')
+save_model(main_model, 'Model-Files/componentModel.h5')
+
+model = load_model('Model-Files/componentModel.h5')
+im = Image.open('30by30-images/Capacitor/image1007.png')
+im = im.resize((30, 30))
+Desired_component_size = 30
+# Size of the image in pixels (size of original image)
+# (This is not mandatory)
+width, height = im.size
+print(width, height)
+IM = im.crop((0, 0, width - (width % Desired_component_size), height - (height % Desired_component_size)))
+width, height = IM.size
+print(width, height)
+IM.show()
+im1 = []
+# Setting the points for cropped image
+left = 0
+top = 0
+right = Desired_component_size
+bottom = Desired_component_size
+p = 0
+while (right <= width):
+    while (bottom <= height):
+        im1.append(IM.crop((left, top, right, bottom)))
+        top = top + Desired_component_size
+        bottom = bottom + Desired_component_size
+    top = 0
+    bottom = Desired_component_size
+    left = left + Desired_component_size
+    right = right + Desired_component_size
+
+i = 0
+print(len(im1))
+while (i < len(im1)):
+    im1[i].show()
+    i = i + 1
+    time.sleep(0.1)
+def preprocess_image_from_array(img, target_size=(30, 30)):
+    img2 = ImageOps.grayscale(img)
+    img2 = img2.resize(target_size)
+    img2 = image.img_to_array(img2)
+    img2 = np.expand_dims(img2, axis=0)
+    return img2
+
+# Process and predict for each cropped image
+for img in im1:
+    new_image = preprocess_image_from_array(img)
+    plt.imshow(new_image[0].reshape(30, 30), cmap='gray')
+    plt.title('Preprocessed Image')
+    plt.show()
+
+    predictions = model.predict(new_image)
+
+    if model.layers[-1].activation == tf.keras.activations.softmax:
+        softmax_probabilities = predictions
+    else:
+        softmax_probabilities = tf.nn.softmax(predictions).numpy()
+
+    print(f"Softmax probabilities: {softmax_probabilities}")
+    predicted_class = np.argmax(softmax_probabilities)
+    print(f"Predicted class: {predicted_class}")
+    if(predicted_class == 0):
+        print("Capacitor")
+    elif(predicted_class == 1):
+        print("IC_Voltage_Regulator")
+    elif(predicted_class == 2):
+        print("Potetiometer")
