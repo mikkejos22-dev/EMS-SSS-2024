@@ -1,0 +1,75 @@
+import time
+import tensorflow as tf
+from tensorflow.keras.models import load_model
+import numpy as np
+from tensorflow.keras.preprocessing import image
+from PIL import Image, ImageOps
+import matplotlib.pyplot as plt
+
+
+# Load the correct model
+model = load_model('Model-Files/componentModel.h5')
+im = Image.open('30by30-images/Capacitor/image1007.png')
+im = im.resize((30, 30))
+Desired_component_size = 30
+# Size of the image in pixels (size of original image)
+# (This is not mandatory)
+width, height = im.size
+print(width, height)
+IM = im.crop((0, 0, width - (width % Desired_component_size), height - (height % Desired_component_size)))
+width, height = IM.size
+print(width, height)
+IM.show()
+im1 = []
+# Setting the points for cropped image
+left = 0
+top = 0
+right = Desired_component_size
+bottom = Desired_component_size
+p = 0
+while (right <= width):
+    while (bottom <= height):
+        im1.append(IM.crop((left, top, right, bottom)))
+        top = top + Desired_component_size
+        bottom = bottom + Desired_component_size
+    top = 0
+    bottom = Desired_component_size
+    left = left + Desired_component_size
+    right = right + Desired_component_size
+
+i = 0
+print(len(im1))
+while (i < len(im1)):
+    im1[i].show()
+    i = i + 1
+    time.sleep(0.1)
+def preprocess_image_from_array(img, target_size=(30, 30)):
+    img2 = ImageOps.grayscale(img)
+    img2 = img2.resize(target_size)
+    img2 = image.img_to_array(img2)
+    img2 = np.expand_dims(img2, axis=0)
+    return img2
+
+# Process and predict for each cropped image
+for img in im1:
+    new_image = preprocess_image_from_array(img)
+    plt.imshow(new_image[0].reshape(30, 30), cmap='gray')
+    plt.title('Preprocessed Image')
+    plt.show()
+
+    predictions = model.predict(new_image)
+
+    if model.layers[-1].activation == tf.keras.activations.softmax:
+        softmax_probabilities = predictions
+    else:
+        softmax_probabilities = tf.nn.softmax(predictions).numpy()
+
+    print(f"Softmax probabilities: {softmax_probabilities}")
+    predicted_class = np.argmax(softmax_probabilities)
+    print(f"Predicted class: {predicted_class}")
+    if(predicted_class == 0):
+        print("Capacitor")
+    elif(predicted_class == 1):
+        print("IC_Voltage_Regulator")
+    elif(predicted_class == 2):
+        print("Potetiometer")
