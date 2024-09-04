@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 # Load the correct model
 model = load_model('Model-Files/componentModel.h5')
-im = Image.open('30by30-images/Capacitor/image1007.png')
+im = Image.open('30by30-images/Potentiometer/image2003.png')
 im = im.resize((30, 30))
 Desired_component_size = 30
 # Size of the image in pixels (size of original image)
