@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 # Load the correct model
 model = load_model('Model-Files/componentModel.h5')
 im = Image.open('30by30-images/Potentiometer/image2003.png')
-im = im.resize((30, 30))
 Desired_component_size = 30
 # Size of the image in pixels (size of original image)
 # (This is not mandatory)
@@ -53,6 +52,7 @@ def preprocess_image_from_array(img, target_size=(30, 30)):
 # Process and predict for each cropped image
 for img in im1:
     new_image = preprocess_image_from_array(img)
+    new_image = new_image.resize(30,30)
     plt.imshow(new_image[0].reshape(30, 30), cmap='gray')
     plt.title('Preprocessed Image')
     plt.show()
