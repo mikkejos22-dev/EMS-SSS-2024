@@ -1,18 +1,17 @@
 from __future__ import print_function
 import tensorflow as tf
-import os
 from keras.src.saving.saving_api import save_model
 from keras.callbacks import ReduceLROnPlateau, ModelCheckpoint
 from keras.optimizers import RMSprop
-from keras.src.layers import AveragePooling2D, GlobalAveragePooling2D, Reshape, Multiply
+from keras.src.layers import AveragePooling2D, GlobalAveragePooling2D, Reshape, Multiply, MaxPooling2D, MaxPooling1D, \
+    GlobalAveragePooling1D, GlobalAveragePooling3D
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.models import Sequential, Model
 from tensorflow.keras.layers import Dense, Dropout, Activation, Flatten, BatchNormalization, Input
-from tensorflow.keras.layers import Conv2D, MaxPooling2D
+from tensorflow.keras.layers import Conv2D, AveragePooling2D
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.regularizers import l2
 import tensorflow.keras.backend as K
-from tensorflow_hub import KerasLayer
 
 
 main_directory = '30by30-images'  # Add personal directory here
@@ -131,7 +130,7 @@ transfer_test_augmented = component_test.cache().prefetch(buffer_size=AUTOTUNE)
 # Reduce learning rate on plateau: helps with overfitting
 reduce_lr = ReduceLROnPlateau(
     monitor='val_loss',
-    factor=0.15,  # Factor by which the learning rate will be reduced
+    factor=0.17,  # Factor by which the learning rate will be reduced
     patience=2,  # Number of epochs with no improvement after which learning rate will be reduced
     min_lr=0.000001  # Lower bound on the learning rate
 )
@@ -177,12 +176,9 @@ x = MaxPooling2D()(x)
 x = Dropout(0.33)(x)
 x = Conv2D(32, 3, activation='silu')(x)
 x = BatchNormalization()(x)
-x = AveragePooling2D(pool_size=(2, 2))(x)
+x = MaxPooling2D()(x)
 x = Attention_Module(x)
-x = Flatten()(x)
-x = Dense(512, activation='silu')(x)
-x = Dense(256, activation='sigmoid')(x)
-x = Dropout(0.45)(x)
+x = GlobalAveragePooling2D()(x)
 output_layer = Dense(4, activation='softmax')(x)
 
 
@@ -215,14 +211,10 @@ x = MaxPooling2D()(x)
 x = Dropout(0.33)(x)
 x = Conv2D(32, 3, activation='silu')(x)
 x = BatchNormalization()(x)
-x = AveragePooling2D(pool_size=(2, 2))(x)
+x = MaxPooling2D()(x)
 x = Attention_Module(x)
-x = Flatten()(x)
-
-x = Dense(512, activation='silu')(x)
-x = Dense(256, activation='sigmoid')(x)
-x = Dropout(0.45)(x)
-output_layer = Dense(4, activation='softmax')(x)
+x = GlobalAveragePooling2D()(x)
+output_layer = Dense(3, activation='softmax')(x)
 
 # Initialize main model with pretrained weights
 main_model = Model(inputs=input_layer, outputs=output_layer)
