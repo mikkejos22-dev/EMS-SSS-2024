@@ -1,5 +1,6 @@
 import time
 import tensorflow as tf
+from inference_sdk import InferenceHTTPClient
 from tensorflow.keras.models import load_model
 import numpy as np
 from tensorflow.keras.preprocessing import image
@@ -49,16 +50,13 @@ def preprocess_image_from_array(img, target_size=(30, 30)):
     img2 = np.expand_dims(img2, axis=0)
     return img2
 
-# Process and predict for each cropped image
 for img in im1:
     new_image = preprocess_image_from_array(img)
-    new_image = new_image.resize(30,30)
-    plt.imshow(new_image[0].reshape(30, 30), cmap='gray')
+    plt.imshow(new_image[0], cmap='gray')
     plt.title('Preprocessed Image')
     plt.show()
 
     predictions = model.predict(new_image)
-
     if model.layers[-1].activation == tf.keras.activations.softmax:
         softmax_probabilities = predictions
     else:
@@ -73,3 +71,11 @@ for img in im1:
         print("IC_Voltage_Regulator")
     elif(predicted_class == 2):
         print("Potetiometer")
+CLIENT = InferenceHTTPClient(
+    api_url="https://detect.roboflow.com",
+    api_key= "ENTER KEY HERE"
+)
+
+result = CLIENT.infer(im, model_id="printed-circuit-board/3")
+print('API Result:')
+print(result)
